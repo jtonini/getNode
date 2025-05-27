@@ -1,0 +1,433 @@
+#!/usr/bin/env python3
+
+import subprocess
+import sys
+import time
+import os
+import argparse
+from pathlib import Path
+
+def check_ssh_directory():
+    """Check if SSH directory exists"""
+    ssh_dir = Path.home() / ".ssh"
+    
+    if not ssh_dir.exists():
+        print("ERROR: SSH directory not found!")
+        print("You need to set up SSH keys before using this script.")
+        print("")
+        print("To set up SSH keys:")
+        print("1. Generate SSH key pair:")
+        print("   ssh-keygen -t rsa -b 4096")
+        print("2. Copy your public key to the cluster:")
+        print(f"   ssh-copy-id {get_current_user()}@spydur")
+        print("3. Test your connection:")
+        print(f"   ssh {get_current_user()}@spydur")
+        print("")
+        print("Once SSH keys are working, run this script again.")
+        return False
+    
+    return True
+
+def get_current_user():
+    """Get current username"""
+    try:
+        return subprocess.check_output(['whoami']).decode().strip()
+    except:
+        return os.getenv('USER', os.getenv('USERNAME', 'unknown'))
+
+def main():
+    local_user = get_current_user()
+    
+    # Set up argument parser
+    parser = argparse.ArgumentParser(
+        description='Remote Development Compute Node Allocation Helper',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Available Partitions:
+  CPU Partitions:
+    basic           Basic CPU resources (default)
+    medium          Medium CPU resources  
+    large           Large CPU resources
+  
+  GPU Partitions:
+    ML              A100 GPUs for Machine Learning
+    sci             A40 GPUs for Scientific Computing
+    
+  Faculty Condos:
+    yang1           Yang group condo 1
+    yang2           Yang group condo 2
+
+Examples:
+  getNode                                       # All defaults (basic, 4:00:00, local user)
+  getNode -p ML                                 # ML partition, other defaults
+  getNode -u jtonini                            # Basic partition, user jtonini
+  getNode -u jtonini -p ML                      # ML partition, user jtonini
+  getNode -u jtonini -p sci -t 8:00:00          # Sci partition, 8 hours, user jtonini
+  getNode -u jtonini -p ML -t 2:00:00 -g 2      # ML partition, 2 hours, 2 GPUs, user jtonini
+  getNode --user jtonini --partition yang1      # Yang1 condo, user jtonini
+  getNode -p medium -t 12:00:00 -c 8 -m 32G     # Medium CPU, 12 hours, 8 CPUs, 32GB RAM
+
+Requirements:
+- Remote development tool (VS Code, PyCharm, etc.) with SSH support
+- SSH keys set up for passwordless login to the cluster
+        """)
+    
+    parser.add_argument('-u', '--user', 
+                       default=local_user,
+                       help=f'Cluster username (default: {local_user})')
+    
+    parser.add_argument('-p', '--partition', 
+                       default='basic',
+                       choices=['basic', 'medium', 'large', 'ML', 'sci', 'yang1', 'yang2'],
+                       help='SLURM partition (default: basic)')
+    
+    parser.add_argument('-t', '--time', 
+                       default='4:00:00',
+                       help='Job time limit in HH:MM:SS format (default: 4:00:00)')
+    
+    parser.add_argument('-g', '--gpus', 
+                       type=int,
+                       help='Number of GPUs to request (default: 1 for GPU partitions)')
+    
+    parser.add_argument('-c', '--cpus', 
+                       type=int,
+                       default=4,
+                       help='Number of CPU cores (default: 4)')
+    
+    parser.add_argument('-m', '--memory', 
+                       default='16G',
+                       help='Memory amount (e.g., 16G, 32G) (default: 16G)')
+    
+    args = parser.parse_args()
+    
+    print("Remote Development Compute Node Helper")
+    print("=" * 40)
+    
+    username = args.user
+    partition = args.partition
+    time_limit = args.time
+    gpu = args.gpus
+    cpus = args.cpus
+    memory = args.memory
+    
+    print(f"Local user: {local_user}")
+    if username != local_user:
+        print(f"Cluster user: {username}")
+    else:
+        print(f"Cluster user: {username} (same as local)")
+    
+    # Show partition info
+    partition_info = {
+        'basic': 'CPU - Basic resources',
+        'medium': 'CPU - Medium resources', 
+        'large': 'CPU - Large resources',
+        'ML': 'GPU - A100s for Machine Learning',
+        'sci': 'GPU - A40s for Scientific Computing',
+        'yang1': 'Faculty condo - Yang group 1',
+        'yang2': 'Faculty condo - Yang group 2'
+    }
+    
+    if partition in partition_info:
+        print(f"Partition: {partition} ({partition_info[partition]})")
+    else:
+        print(f"Partition: {partition}")
+    
+    print(f"Time limit: {time_limit}")
+    
+    # Set GPU default for GPU partitions
+    gpu_partitions = ['ML', 'sci']
+    if partition in gpu_partitions and gpu is None:
+        gpu = 1  # Default to 1 GPU for GPU partitions
+    
+    # Display resource allocation
+    print(f"CPUs: {cpus}")
+    print(f"Memory: {memory}")
+    if gpu:
+        print(f"GPUs: {gpu}")
+    
+    # Check SSH directory exists
+    if not check_ssh_directory():
+        sys.exit(1)
+    
+    # Test SSH connection
+    if not test_ssh_connection(username):
+        sys.exit(1)
+    
+    # Allocate compute node and set up SSH config
+    success = getCode(username, partition, time_limit, gpu, cpus, memory)
+    
+    if not success:
+        sys.exit(1)
+
+def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4, memory="16G", cluster="spydur"):
+    """Allocate compute node resources using salloc"""
+    print(f"User: {username}")
+    print(f"Requesting compute node allocation on partition '{partition}' for {time_limit}...")
+    
+    # Build salloc command for resource allocation:
+    salloc_cmd_parts = [
+        "salloc",
+        "--nodes=1",
+        f"--cpus-per-task={cpus}",
+        f"--mem={memory}",
+        f"--time={time_limit}",
+        f"--partition={partition}",
+        f"--account={username}"
+    ]
+    
+    # Add GPU specifications for GPU partitions
+    gpu_partitions = ['ML', 'sci']
+    if partition in gpu_partitions:
+        if gpu and gpu > 0:
+            salloc_cmd_parts.append(f"--gres=gpu:{gpu}")
+            print(f"GPUs requested: {gpu}")
+        else:
+            salloc_cmd_parts.append("--gres=gpu:1")
+            print("GPUs requested: 1 (default)")
+    elif gpu and gpu > 0:
+        # Non-GPU partition but GPU requested
+        salloc_cmd_parts.append(f"--gres=gpu:{gpu}")
+        print(f"GPUs requested: {gpu}")
+    
+    print("Connecting to cluster and requesting resource allocation...")
+    print("Resource allocation:")
+    print(f"  Nodes: 1")
+    print(f"  CPUs per task: {cpus}")
+    print(f"  Memory: {memory}")
+    if partition in gpu_partitions or (gpu and gpu > 0):
+        if partition == 'ML':
+            print(f"  GPUs: {gpu or 1} (A100s)")
+        elif partition == 'sci':
+            print(f"  GPUs: {gpu or 1} (A40s)")
+        elif gpu:
+            print(f"  GPUs: {gpu}")
+    
+    print("This may take a moment while waiting for resources...")
+    
+    try:
+        # Step 1: Submit allocation request - get node info via squeue after allocation
+        salloc_cmd = " ".join(salloc_cmd_parts)
+        ssh_cmd = [
+            "ssh", f"{username}@{cluster}",
+            f"{salloc_cmd} bash -c 'echo JOB_ID:$SLURM_JOB_ID; sleep 2; NODE=$(squeue -j $SLURM_JOB_ID -h -o %N); echo COMPUTE_NODE:$NODE; echo ALLOCATION_READY; exec bash'"
+        ]
+        
+        # Start the SSH + salloc process
+        process = subprocess.Popen(
+            ssh_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1
+        )
+        
+        compute_node = None
+        job_id = None
+        print("Waiting for resource allocation...")
+        
+        for line in iter(process.stdout.readline, ''):
+            output_line = line.rstrip()
+            print(output_line)
+            
+            if output_line.startswith("JOB_ID:"):
+                job_id = output_line.split(":")[1].strip()
+                print(f"Job ID: {job_id}")
+            elif output_line.startswith("COMPUTE_NODE:"):
+                compute_node = output_line.split(":")[1].strip()
+                if compute_node:  # Only proceed if we got a node name
+                    print(f"Compute node allocated: {compute_node}")
+                else:
+                    print("Warning: Compute node name is empty, trying alternative method...")
+                    # Try alternative method to get node name
+                    if job_id:
+                        try:
+                            get_node_cmd = ["ssh", f"{username}@{cluster}", f"squeue -j {job_id} -h -o %N"]
+                            result = subprocess.run(get_node_cmd, capture_output=True, text=True, timeout=10)
+                            if result.returncode == 0 and result.stdout.strip():
+                                compute_node = result.stdout.strip()
+                                print(f"Compute node found via squeue: {compute_node}")
+                        except:
+                            print("Could not determine compute node name")
+            elif output_line.startswith("ALLOCATION_READY"):
+                if compute_node and compute_node.strip():
+                    update_ssh_config(compute_node, username, cluster)
+                    print("\nSUCCESS: Resource allocation ready for remote access!")
+                    print("=" * 50)
+                    print("Next steps:")
+                    print("1. Open VS Code (or your preferred remote development tool)")
+                    print("2. Install 'Remote - SSH' extension if using VS Code")
+                    print(f"3. Connect to: {cluster}-compute")
+                    print("4. Remote client will tunnel through the head node to your compute node")
+                    print("5. When done, press Ctrl+C here to release the allocation")
+                    if job_id:
+                        print(f"6. Or manually cancel with: scancel {job_id}")
+                    print("=" * 50)
+                    break
+                else:
+                    print("ERROR: Could not determine compute node name")
+                    return False
+        
+        if compute_node and job_id:
+            print(f"\nJob {job_id} is running on {compute_node}")
+            print("Allocation will remain active until:")
+            print(f"  - Time limit expires ({time_limit})")
+            print("  - You press Ctrl+C")
+            print(f"  - You run: ssh {username}@{cluster} scancel {job_id}")
+            
+            # Keep the process alive until user interrupts
+            try:
+                process.wait()
+            except KeyboardInterrupt:
+                print(f"\nCancelling job {job_id}...")
+                # Cancel the SLURM job
+                cancel_cmd = ["ssh", f"{username}@{cluster}", "scancel", job_id]
+                try:
+                    subprocess.run(cancel_cmd, timeout=10)
+                    print(f"Job {job_id} cancelled successfully.")
+                except:
+                    print(f"Warning: Could not cancel job {job_id}. You may need to cancel manually:")
+                    print(f"  ssh {username}@{cluster} scancel {job_id}")
+                
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+        else:
+            print("ERROR: Failed to get complete resource allocation information")
+            return False
+            
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return False
+    
+    return True
+
+def show_usage():
+    """Show usage information - now handled by argparse"""
+    pass
+def test_ssh_connection(username, cluster="spydur"):
+    """Test SSH connection to cluster"""
+    print("Testing SSH connection to cluster...")
+    test_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", 
+                f"{username}@{cluster}", "echo", "SSH_OK"]
+    
+    try:
+        result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0 and "SSH_OK" in result.stdout:
+            print("SUCCESS: SSH connection verified")
+            return True
+        else:
+            print("ERROR: SSH connection failed!")
+            print("Make sure you can connect without a password:")
+            print(f"   ssh {username}@{cluster}")
+            return False
+    except:
+        print("ERROR: Cannot connect to cluster!")
+        print(f"Please test manually: ssh {username}@{cluster}")
+        return False
+
+def update_ssh_config(compute_node, username, cluster="spydur"):
+    """Update SSH config with compute node information - creates config if missing"""
+    ssh_dir = Path.home() / ".ssh"
+    ssh_config_path = ssh_dir / "config"
+    
+    # Ensure .ssh directory exists
+    ssh_dir.mkdir(mode=0o700, exist_ok=True)
+    
+    # Always backup existing config if it exists
+    if ssh_config_path.exists():
+        backup_path = f"{ssh_config_path}.backup.{int(time.time())}"
+        subprocess.run(["cp", str(ssh_config_path), backup_path])
+        print(f"SSH config backed up to: {backup_path}")
+    else:
+        print("Creating new SSH config file...")
+    
+    # Read existing config to preserve it
+    existing_config = ""
+    if ssh_config_path.exists():
+        existing_config = ssh_config_path.read_text()
+    
+    # Remove ONLY our previous auto-generated entries (if any)
+    lines = existing_config.split('\n') if existing_config else []
+    filtered_lines = []
+    skip_section = False
+    
+    for line in lines:
+        # Start skipping when we find our auto-generated section
+        if "# Remote development compute node (auto-generated" in line:
+            skip_section = True
+            continue
+        # Stop skipping when we hit a new Host section that's not ours
+        elif line.startswith("Host ") and skip_section:
+            # Check if this is our compute host - if so, keep skipping
+            if line.strip() == f"Host {cluster}-compute":
+                continue
+            else:
+                # This is a different host, stop skipping
+                skip_section = False
+        
+        # Only add lines that aren't in our skip section
+        if not skip_section:
+            filtered_lines.append(line)
+    
+    # Preserve existing content structure
+    if filtered_lines:
+        # Remove trailing empty lines only
+        while filtered_lines and not filtered_lines[-1].strip():
+            filtered_lines.pop()
+        preserved_config = '\n'.join(filtered_lines)
+    else:
+        preserved_config = ""
+    
+    # Check if head node config already exists in preserved config
+    head_node_exists = f"Host {cluster}" in preserved_config and f"HostName {cluster}" in preserved_config
+    
+    # New compute node configuration
+    compute_config = f"""
+# Remote development compute node (auto-generated - {time.strftime('%Y-%m-%d %H:%M:%S')})
+# This section is managed by the compute node allocation script
+Host {cluster}-compute
+    HostName {compute_node}
+    User {username}
+    ProxyJump {username}@{cluster}
+    IdentityFile ~/.ssh/id_rsa
+    ServerAliveInterval 60
+    ServerAliveCountMax 10
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null"""
+    
+    # Add head node config if it doesn't exist
+    head_node_config = ""
+    if not head_node_exists:
+        head_node_config = f"""
+
+# Cluster head node (added by compute allocation script)
+Host {cluster}
+    HostName {cluster}
+    User {username}
+    IdentityFile ~/.ssh/id_rsa
+    ServerAliveInterval 60
+    ServerAliveCountMax 10"""
+        print(f"Adding {cluster} head node configuration")
+    else:
+        print(f"Found existing {cluster} configuration - preserving it")
+    
+    # Combine: preserved content + new compute config + head node config (if needed)
+    if preserved_config:
+        final_config = preserved_config + compute_config + head_node_config
+    else:
+        # No existing config, create new one
+        final_config = f"""# SSH Configuration
+# Existing configuration preserved by compute allocation script
+{compute_config.lstrip()}{head_node_config}"""
+    
+    # Write the final config with proper permissions
+    ssh_config_path.write_text(final_config)
+    ssh_config_path.chmod(0o600)  # Secure permissions for SSH config
+    
+    print(f"SSH config updated safely - existing configuration preserved!")
+    print(f"Connect remote client to: {cluster}-compute")
+
+if __name__ == "__main__":
+    main()
