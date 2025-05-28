@@ -45,7 +45,6 @@ ssh-keygen
 ```
 
 - Press Enter to accept the default file location
-- Enter a passphrase (recommended) or press Enter for no passphrase
 
 **Add your public key to the cluster:**
 
