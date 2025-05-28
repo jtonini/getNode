@@ -151,44 +151,64 @@ def update_ssh_config(compute_node, username, cluster="spydur"):
     if ssh_config_path.exists():
         existing_config = ssh_config_path.read_text()
 
-    # Remove ONLY our previous auto-generated entries (if any)
+    # More robust removal of ALL previous getNode-generated entries
     lines = existing_config.split('\n') if existing_config else []
     filtered_lines = []
     skip_section = False
-
-    for line in lines:
-        # Start skipping when we find our auto-generated section
-        if "# Remote development compute node (auto-generated" in line:
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # Check for start of our auto-generated sections
+        if ("# Remote development compute node (auto-generated" in line or
+            "# Cluster head node (added by compute allocation script)" in line or
+            line.strip() == f"Host {cluster}-compute" or
+            (line.strip() == f"Host {cluster}" and 
+             i + 1 < len(lines) and 
+             "added by compute allocation script" in "".join(lines[max(0, i-5):i+5]))):
+            
+            print(f"Removing old getNode entry: {line.strip()}")
             skip_section = True
+            
+            # Skip until we find the next Host section or end of file
+            while i < len(lines):
+                current_line = lines[i]
+                
+                # If we hit a new Host section that's not ours, stop skipping
+                if (current_line.startswith("Host ") and 
+                    not current_line.strip() == f"Host {cluster}-compute" and
+                    not (current_line.strip() == f"Host {cluster}" and 
+                         "added by compute allocation script" in "".join(lines[max(0, i-5):i+10]))):
+                    skip_section = False
+                    break
+                    
+                i += 1
+            
+            # Don't increment i again, we're already at the next section
             continue
-        # Stop skipping when we hit a new Host section that's not ours
-        elif line.startswith("Host ") and skip_section:
-            # Check if this is our compute host - if so, keep skipping
-            if line.strip() == f"Host {cluster}-compute":
-                continue
-            else:
-                # This is a different host, stop skipping
-                skip_section = False
-
+            
         # Only add lines that aren't in our skip section
         if not skip_section:
             filtered_lines.append(line)
+        
+        i += 1
 
-    # Preserve existing content structure
-    if filtered_lines:
-        # Remove trailing empty lines only
-        while filtered_lines and not filtered_lines[-1].strip():
-            filtered_lines.pop()
-        preserved_config = '\n'.join(filtered_lines)
-    else:
-        preserved_config = ""
+    # Clean up extra blank lines at the end
+    while filtered_lines and not filtered_lines[-1].strip():
+        filtered_lines.pop()
+        
+    preserved_config = '\n'.join(filtered_lines) if filtered_lines else ""
 
-    # Check if head node config already exists in preserved config
-    head_node_exists = f"Host {cluster}" in preserved_config and f"HostName {cluster}" in preserved_config
+    # Check if head node config already exists in preserved config (that we didn't just remove)
+    head_node_exists = (f"Host {cluster}" in preserved_config and 
+                       f"HostName {cluster}" in preserved_config and
+                       "added by compute allocation script" not in preserved_config)
 
-    # New compute node configuration - place it BEFORE any wildcard entries
+    # New compute node configuration
+    current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     compute_config = f"""
-# Remote development compute node (auto-generated - {time.strftime('%Y-%m-%d %H:%M:%S')})
+# Remote development compute node (auto-generated - {current_time})
 # This section is managed by the compute node allocation script
 Host {cluster}-compute
     HostName {compute_node}
@@ -222,9 +242,9 @@ Host {cluster}
     
     # Find the first 'Host *' entry
     wildcard_index = -1
-    for i, line in enumerate(config_lines):
+    for idx, line in enumerate(config_lines):
         if line.strip().startswith('Host *'):
-            wildcard_index = i
+            wildcard_index = idx
             break
     
     if wildcard_index >= 0:
@@ -244,14 +264,14 @@ Host {cluster}
         else:
             # No existing config, create new one
             final_config = f"""# SSH Configuration
-# Existing configuration preserved by compute allocation script
+# Configuration managed by getNode compute allocation script
 {compute_config.lstrip()}{head_node_config}"""
 
     # Write the final config with proper permissions
     ssh_config_path.write_text(final_config)
     ssh_config_path.chmod(0o600)  # Secure permissions for SSH config
 
-    print(f"SSH config updated safely - existing configuration preserved!")
+    print(f"SSH config updated - old getNode entries removed, new entry added")
     print(f"Connect remote client to: {cluster}-compute")
 
 def test_ssh_connection(username, cluster="spydur"):
