@@ -41,7 +41,7 @@ ls -la ~/.ssh/
 **If you don't see `id_rsa` and `id_rsa.pub`, create them:**
 
 ```bash
-ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
+ssh-keygen
 ```
 
 - Press Enter to accept the default file location
