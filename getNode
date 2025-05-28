@@ -118,7 +118,7 @@ def fix_ssh_config_ordering(ssh_config_path):
             # Write the corrected config
             corrected_content = '\n'.join(new_lines)
             ssh_config_path.write_text(corrected_content)
-            ssh_config_path.chmod(0o600)
+           e ssh_config_path.chmod(0o600)
             
             print("SSH config ordering fixed!")
             print("Specific host entries are now placed before wildcard entries.")
@@ -275,14 +275,20 @@ def test_ssh_connection(username, cluster="spydur"):
         print(f"Please test manually: ssh {username}@{cluster}")
         return False
 
-def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4, memory="16G", cluster="spydur"):
-    """Allocate compute node resources using salloc"""
+def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4, memory="16G", cluster="spydur", interactive=False):
+    """Allocate compute node resources using salloc or srun"""
     print(f"User: {username}")
-    print(f"Requesting compute node allocation on partition '{partition}' for {time_limit}...")
+    
+    if interactive:
+        print(f"Requesting interactive session on partition '{partition}' for {time_limit}...")
+        command_type = "srun"
+    else:
+        print(f"Requesting compute node allocation on partition '{partition}' for {time_limit}...")
+        command_type = "salloc"
 
-    # Build salloc command for resource allocation:
-    salloc_cmd_parts = [
-        "salloc",
+    # Build command for resource allocation (salloc or srun):
+    cmd_parts = [
+        command_type,
         "--nodes=1",
         f"--cpus-per-task={cpus}",
         f"--mem={memory}",
@@ -291,18 +297,22 @@ def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4,
         f"--account={username}"
     ]
 
+    # For interactive sessions, add the --pty flag for proper terminal
+    if interactive:
+        cmd_parts.append("--pty")
+
     # Add GPU specifications for GPU partitions
     gpu_partitions = ['ML', 'sci']
     if partition in gpu_partitions:
         if gpu and gpu > 0:
-            salloc_cmd_parts.append(f"--gres=gpu:{gpu}")
+            cmd_parts.append(f"--gres=gpu:{gpu}")
             print(f"GPUs requested: {gpu}")
         else:
-            salloc_cmd_parts.append("--gres=gpu:1")
+            cmd_parts.append("--gres=gpu:1")
             print("GPUs requested: 1 (default)")
     elif gpu and gpu > 0:
         # Non-GPU partition but GPU requested
-        salloc_cmd_parts.append(f"--gres=gpu:{gpu}")
+        cmd_parts.append(f"--gres=gpu:{gpu}")
         print(f"GPUs requested: {gpu}")
 
     print("Connecting to cluster and requesting resource allocation...")
@@ -321,97 +331,121 @@ def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4,
     print("This may take a moment while waiting for resources...")
 
     try:
-        # Step 1: Submit allocation request - get node info via squeue after allocation
-        salloc_cmd = " ".join(salloc_cmd_parts)
-        ssh_cmd = [
-            "ssh", f"{username}@{cluster}",
-            f"{salloc_cmd} bash -c 'echo JOB_ID:$SLURM_JOB_ID; sleep 2; NODE=$(squeue -j $SLURM_JOB_ID -h -o %N); echo COMPUTE_NODE:$NODE; echo ALLOCATION_READY; exec bash'"
-        ]
-
-        # Start the SSH + salloc process
-        process = subprocess.Popen(
-            ssh_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            bufsize=1
-        )
-
-        compute_node = None
-        job_id = None
-        print("Waiting for resource allocation...")
-
-        for line in iter(process.stdout.readline, ''):
-            output_line = line.rstrip()
-            print(output_line)
-
-            if output_line.startswith("JOB_ID:"):
-                job_id = output_line.split(":")[1].strip()
-                print(f"Job ID: {job_id}")
-            elif output_line.startswith("COMPUTE_NODE:"):
-                compute_node = output_line.split(":")[1].strip()
-                if compute_node:  # Only proceed if we got a node name
-                    print(f"Compute node allocated: {compute_node}")
-                else:
-                    print("Warning: Compute node name is empty, trying alternative method...")
-                    # Try alternative method to get node name
-                    if job_id:
-                        try:
-                            get_node_cmd = ["ssh", f"{username}@{cluster}", f"squeue -j {job_id} -h -o %N"]
-                            result = subprocess.run(get_node_cmd, capture_output=True, text=True, timeout=10)
-                            if result.returncode == 0 and result.stdout.strip():
-                                compute_node = result.stdout.strip()
-                                print(f"Compute node found via squeue: {compute_node}")
-                        except:
-                            print("Could not determine compute node name")
-            elif output_line.startswith("ALLOCATION_READY"):
-                if compute_node and compute_node.strip():
-                    update_ssh_config(compute_node, username, cluster)
-                    print("\nSUCCESS: Resource allocation ready for remote access!")
-                    print("=" * 50)
-                    print("Next steps:")
-                    print("1. Open VS Code (or your preferred remote development tool)")
-                    print("2. Install 'Remote - SSH' extension if using VS Code")
-                    print(f"3. Connect to: {cluster}-compute")
-                    print("4. Remote client will tunnel through the head node to your compute node")
-                    print("5. When done, press Ctrl+C here to release the allocation")
-                    if job_id:
-                        print(f"6. Or manually cancel with: scancel {job_id}")
-                    print("=" * 50)
-                    break
-                else:
-                    print("ERROR: Could not determine compute node name")
-                    return False
-
-        if compute_node and job_id:
-            print(f"\nJob {job_id} is running on {compute_node}")
-            print("Allocation will remain active until:")
-            print(f"  - Time limit expires ({time_limit})")
-            print("  - You press Ctrl+C")
-            print(f"  - You run: ssh {username}@{cluster} scancel {job_id}")
-
-            # Keep the process alive until user interrupts
-            try:
-                process.wait()
-            except KeyboardInterrupt:
-                print(f"\nCancelling job {job_id}...")
-                # Cancel the SLURM job
-                cancel_cmd = ["ssh", f"{username}@{cluster}", "scancel", job_id]
-                try:
-                    subprocess.run(cancel_cmd, timeout=10)
-                    print(f"Job {job_id} cancelled successfully.")
-                except:
-                    print(f"Warning: Could not cancel job {job_id}. You may need to cancel manually:")
-                    print(f"  ssh {username}@{cluster} scancel {job_id}")
-
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+        if interactive:
+            # For interactive sessions, use srun directly
+            cmd_str = " ".join(cmd_parts)
+            ssh_cmd = [
+                "ssh", "-t", f"{username}@{cluster}",
+                f"{cmd_str} bash"
+            ]
+            
+            print("Starting interactive session...")
+            print("Note: This will open a direct terminal session on the compute node.")
+            print("When you exit the session, the allocation will be automatically released.")
+            print("=" * 50)
+            
+            # Run the interactive session
+            result = subprocess.run(ssh_cmd)
+            
+            if result.returncode == 0:
+                print("Interactive session completed successfully.")
+                return True
+            else:
+                print("Interactive session ended with errors.")
+                return False
+                
         else:
-            print("ERROR: Failed to get complete resource allocation information")
-            return False
+            # Original salloc behavior for remote development
+            salloc_cmd = " ".join(cmd_parts)
+            ssh_cmd = [
+                "ssh", f"{username}@{cluster}",
+                f"{salloc_cmd} bash -c 'echo JOB_ID:$SLURM_JOB_ID; sleep 2; NODE=$(squeue -j $SLURM_JOB_ID -h -o %N); echo COMPUTE_NODE:$NODE; echo ALLOCATION_READY; exec bash'"
+            ]
+
+            # Start the SSH + salloc process
+            process = subprocess.Popen(
+                ssh_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
+
+            compute_node = None
+            job_id = None
+            print("Waiting for resource allocation...")
+
+            for line in iter(process.stdout.readline, ''):
+                output_line = line.rstrip()
+                print(output_line)
+
+                if output_line.startswith("JOB_ID:"):
+                    job_id = output_line.split(":")[1].strip()
+                    print(f"Job ID: {job_id}")
+                elif output_line.startswith("COMPUTE_NODE:"):
+                    compute_node = output_line.split(":")[1].strip()
+                    if compute_node:  # Only proceed if we got a node name
+                        print(f"Compute node allocated: {compute_node}")
+                    else:
+                        print("Warning: Compute node name is empty, trying alternative method...")
+                        # Try alternative method to get node name
+                        if job_id:
+                            try:
+                                get_node_cmd = ["ssh", f"{username}@{cluster}", f"squeue -j {job_id} -h -o %N"]
+                                result = subprocess.run(get_node_cmd, capture_output=True, text=True, timeout=10)
+                                if result.returncode == 0 and result.stdout.strip():
+                                    compute_node = result.stdout.strip()
+                                    print(f"Compute node found via squeue: {compute_node}")
+                            except:
+                                print("Could not determine compute node name")
+                elif output_line.startswith("ALLOCATION_READY"):
+                    if compute_node and compute_node.strip():
+                        update_ssh_config(compute_node, username, cluster)
+                        print("\nSUCCESS: Resource allocation ready for remote access!")
+                        print("=" * 50)
+                        print("Next steps:")
+                        print("1. Open VS Code (or your preferred remote development tool)")
+                        print("2. Install 'Remote - SSH' extension if using VS Code")
+                        print(f"3. Connect to: {cluster}-compute")
+                        print("4. Remote client will tunnel through the head node to your compute node")
+                        print("5. When done, press Ctrl+C here to release the allocation")
+                        if job_id:
+                            print(f"6. Or manually cancel with: scancel {job_id}")
+                        print("=" * 50)
+                        break
+                    else:
+                        print("ERROR: Could not determine compute node name")
+                        return False
+
+            if compute_node and job_id:
+                print(f"\nJob {job_id} is running on {compute_node}")
+                print("Allocation will remain active until:")
+                print(f"  - Time limit expires ({time_limit})")
+                print("  - You press Ctrl+C")
+                print(f"  - You run: ssh {username}@{cluster} scancel {job_id}")
+
+                # Keep the process alive until user interrupts
+                try:
+                    process.wait()
+                except KeyboardInterrupt:
+                    print(f"\nCancelling job {job_id}...")
+                    # Cancel the SLURM job
+                    cancel_cmd = ["ssh", f"{username}@{cluster}", "scancel", job_id]
+                    try:
+                        subprocess.run(cancel_cmd, timeout=10)
+                        print(f"Job {job_id} cancelled successfully.")
+                    except:
+                        print(f"Warning: Could not cancel job {job_id}. You may need to cancel manually:")
+                        print(f"  ssh {username}@{cluster} scancel {job_id}")
+
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+            else:
+                print("ERROR: Failed to get complete resource allocation information")
+                return False
 
     except Exception as e:
         print(f"ERROR: {e}")
@@ -455,6 +489,12 @@ Examples:
   getNode -u jtonini -p ML -t 2:00:00 -g 2      # ML partition, 2 hours, 2 GPUs, user jtonini
   getNode --user jtonini --partition yang1      # Yang1 condo, user jtonini
   getNode -p medium -t 12:00:00 -c 8 -m 32G     # Medium CPU, 12 hours, 8 CPUs, 32GB RAM
+  getNode -i -p ML -t 1:00:00                   # Interactive session on ML partition, 1 hour
+  getNode --interactive -u jtonini -p sci       # Interactive session for user jtonini on sci partition
+
+Session Types:
+  Default (salloc): Creates a persistent allocation for remote development (VS Code, etc.)
+  Interactive (-i): Creates an interactive terminal session directly on the compute node
 
 Requirements:
 - Remote development tool (VS Code, PyCharm, etc.) with SSH support
@@ -487,6 +527,10 @@ Requirements:
                        default='16G',
                        help='Memory amount (e.g., 16G, 32G) (default: 16G)')
 
+    parser.add_argument('-i', '--interactive',
+                       action='store_true',
+                       help='Start an interactive session (uses srun instead of salloc)')
+
     args = parser.parse_args()
 
     print("Remote Development Compute Node Helper")
@@ -498,12 +542,17 @@ Requirements:
     gpu = args.gpus
     cpus = args.cpus
     memory = args.memory
+    interactive = args.interactive
 
     print(f"Local user: {local_user}")
     if username != local_user:
         print(f"Cluster user: {username}")
     else:
         print(f"Cluster user: {username} (same as local)")
+
+    # Show session type
+    session_type = "Interactive" if interactive else "Allocation"
+    print(f"Session type: {session_type}")
 
     # Show partition info
     partition_info = {
@@ -544,7 +593,7 @@ Requirements:
         sys.exit(1)
 
     # Allocate compute node and set up SSH config
-    success = getCode(username, partition, time_limit, gpu, cpus, memory)
+    success = getCode(username, partition, time_limit, gpu, cpus, memory, interactive=interactive)
 
     if not success:
         sys.exit(1)
