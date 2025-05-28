@@ -225,14 +225,14 @@ Host {cluster}-compute
     if not head_node_exists:
         head_node_config = f"""
 
-# Cluster head node (added by compute allocation script)
+# Cluster headnode (added by compute allocation script)
 Host {cluster}
     HostName {cluster}
     User {username}
     IdentityFile ~/.ssh/id_rsa
     ServerAliveInterval 60
     ServerAliveCountMax 10"""
-        print(f"Adding {cluster} head node configuration")
+        print(f"Adding {cluster} headnode configuration")
     else:
         print(f"Found existing {cluster} configuration - preserving it")
 
@@ -427,7 +427,7 @@ def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4,
                         print("1. Open VS Code (or your preferred remote development tool)")
                         print("2. Install 'Remote - SSH' extension if using VS Code")
                         print(f"3. Connect to: {cluster}-compute")
-                        print("4. Remote client will tunnel through the head node to your compute node")
+                        print("4. Remote client will tunnel through the headnode to your compute node")
                         print("5. When done, press Ctrl+C here to release the allocation")
                         if job_id:
                             print(f"6. Or manually cancel with: scancel {job_id}")
