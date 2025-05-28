@@ -118,7 +118,7 @@ def fix_ssh_config_ordering(ssh_config_path):
             # Write the corrected config
             corrected_content = '\n'.join(new_lines)
             ssh_config_path.write_text(corrected_content)
-           e ssh_config_path.chmod(0o600)
+            ssh_config_path.chmod(0o600)
             
             print("SSH config ordering fixed!")
             print("Specific host entries are now placed before wildcard entries.")
