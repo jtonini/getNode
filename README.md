@@ -41,7 +41,7 @@ ls -la ~/.ssh/
 **If you don't see `id_rsa` and `id_rsa.pub`, create them:**
 
 ```bash
-ssh-keygen 
+ssh-keygen
 ```
 
 - Press Enter to accept the default file location
@@ -99,6 +99,21 @@ The script will:
 1. Request a compute node from the cluster
 2. Update your `~/.ssh/config` file with the new node information
 3. Create entries for both `spydur` (head node) and `spydur-compute` (allocated compute node)
+
+### Script Options
+
+To see all available options and parameters:
+
+```bash
+./getNode.sh --help
+```
+
+Common options might include:
+- Time limits for the compute node allocation
+- Specific node requirements (memory, CPU cores)
+- Queue/partition selection
+
+**Note**: Run `./getNode.sh --help` to see the current options available, as they may change with updates.
 
 ### Connecting with VS Code
 
@@ -193,4 +208,4 @@ cat ~/.ssh/config
 
 ---
 
-**Note**: This script is designed for the Richmond University cluster. Modify the hostnames and paths as needed for other systems.
+**Note**: This script is designed for the University of Richmond cluster. Modify the hostnames and paths as needed for other systems.
