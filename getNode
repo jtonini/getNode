@@ -56,6 +56,7 @@ Available Partitions:
   Faculty Condos:
     yang1           Yang group condo 1
     yang2           Yang group condo 2
+    yangnolin       Yang and Nolin group condo    
 
 Examples:
   getNode                                       # All defaults (basic, 4:00:00, local user)
@@ -78,7 +79,7 @@ Requirements:
     
     parser.add_argument('-p', '--partition', 
                        default='basic',
-                       choices=['basic', 'medium', 'large', 'ML', 'sci', 'yang1', 'yang2'],
+                       choices=['basic', 'medium', 'large', 'ML', 'sci', 'yang1', 'yang2', 'yangnolin'],
                        help='SLURM partition (default: basic)')
     
     parser.add_argument('-t', '--time', 
@@ -124,7 +125,8 @@ Requirements:
         'ML': 'GPU - A100s for Machine Learning',
         'sci': 'GPU - A40s for Scientific Computing',
         'yang1': 'Faculty condo - Yang group 1',
-        'yang2': 'Faculty condo - Yang group 2'
+        'yang2': 'Faculty condo - Yang group 2',
+        'yangnolin': 'Faculty condo - Yang and Nolin group'
     }
     
     if partition in partition_info:
