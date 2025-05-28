@@ -162,7 +162,7 @@ def update_ssh_config(compute_node, username, cluster="spydur"):
         
         # Check for start of our auto-generated sections
         if ("# Remote development compute node (auto-generated" in line or
-            "# Cluster head node (added by compute allocation script)" in line or
+            "# Cluster headnode (added by compute allocation script)" in line or
             line.strip() == f"Host {cluster}-compute" or
             (line.strip() == f"Host {cluster}" and 
              i + 1 < len(lines) and 
