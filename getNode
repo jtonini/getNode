@@ -16,8 +16,8 @@ def check_ssh_directory():
         print("You need to set up SSH keys before using this script.")
         print("")
         print("To set up SSH keys:")
-        print("1. Generate SSH key pair:")
-        print("   ssh-keygen -t rsa -b 4096")
+        print("1. Generate SSH key pair (Ed25519 recommended):")
+        print("   ssh-keygen -t ed25519")
         print("2. Copy your public key to the cluster:")
         print(f"   ssh-copy-id {get_current_user()}@spydur")
         print("3. Test your connection:")
@@ -29,9 +29,17 @@ def check_ssh_directory():
     return True
 
 def get_current_user():
-    """Get current username"""
+    """Get current username with cluster-friendly default"""
     try:
-        return subprocess.check_output(['whoami']).decode().strip()
+        local_user = subprocess.check_output(['whoami']).decode().strip()
+        # Convert common local usernames to likely cluster usernames
+        # You can customize this mapping for your institution
+        username_mapping = {
+            # Add common mappings here, e.g.:
+            # 'john.doe': 'jdoe',
+            # 'jane.smith': 'jsmith'
+        }
+        return username_mapping.get(local_user, local_user)
     except:
         return os.getenv('USER', os.getenv('USERNAME', 'unknown'))
 
@@ -162,7 +170,7 @@ def update_ssh_config(compute_node, username, cluster="spydur"):
         
         # Check for start of our auto-generated sections
         if ("# Remote development compute node (auto-generated" in line or
-            "# Cluster headnode (added by compute allocation script)" in line or
+            "# Cluster head node (added by compute allocation script)" in line or
             line.strip() == f"Host {cluster}-compute" or
             (line.strip() == f"Host {cluster}" and 
              i + 1 < len(lines) and 
@@ -214,7 +222,7 @@ Host {cluster}-compute
     HostName {compute_node}
     User {username}
     ProxyJump {username}@{cluster}
-    IdentityFile ~/.ssh/id_rsa
+    IdentityFile ~/.ssh/id_ed25519
     ServerAliveInterval 60
     ServerAliveCountMax 10
     StrictHostKeyChecking no
@@ -225,14 +233,14 @@ Host {cluster}-compute
     if not head_node_exists:
         head_node_config = f"""
 
-# Cluster headnode (added by compute allocation script)
+# Cluster head node (added by compute allocation script)
 Host {cluster}
     HostName {cluster}
     User {username}
-    IdentityFile ~/.ssh/id_rsa
+    IdentityFile ~/.ssh/id_ed25519
     ServerAliveInterval 60
     ServerAliveCountMax 10"""
-        print(f"Adding {cluster} headnode configuration")
+        print(f"Adding {cluster} head node configuration")
     else:
         print(f"Found existing {cluster} configuration - preserving it")
 
@@ -427,7 +435,7 @@ def getCode(username, partition="basic", time_limit="4:00:00", gpu=None, cpus=4,
                         print("1. Open VS Code (or your preferred remote development tool)")
                         print("2. Install 'Remote - SSH' extension if using VS Code")
                         print(f"3. Connect to: {cluster}-compute")
-                        print("4. Remote client will tunnel through the headnode to your compute node")
+                        print("4. Remote client will tunnel through the head node to your compute node")
                         print("5. When done, press Ctrl+C here to release the allocation")
                         if job_id:
                             print(f"6. Or manually cancel with: scancel {job_id}")
