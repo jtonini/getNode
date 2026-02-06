@@ -519,6 +519,8 @@ Examples:
   getNode -p medium -t 12:00:00 -c 8 -m 32G     # Medium CPU, 12 hours, 8 CPUs, 32GB RAM
   getNode -i -p ML -t 1:00:00                   # Interactive session on ML partition, 1 hour
   getNode --interactive -u jtonini -p sci       # Interactive session for user jtonini on sci partition
+  getNode --cluster spiderweb -p basic          # Connect to spiderweb cluster
+  getNode --cluster arachne -p ML -g 4          # Connect to arachne cluster with 4 GPUs
 
 Session Types:
   Default (salloc): Creates a persistent allocation for remote development (VS Code, etc.)
@@ -559,6 +561,10 @@ Requirements:
                        action='store_true',
                        help='Start an interactive session (uses srun instead of salloc)')
 
+    parser.add_argument('--cluster',
+                       default='spydur',
+                       help='Cluster hostname (default: spydur)')
+
     args = parser.parse_args()
 
     print("Remote Development Compute Node Helper")
@@ -571,12 +577,16 @@ Requirements:
     cpus = args.cpus
     memory = args.memory
     interactive = args.interactive
+    cluster = args.cluster
 
     print(f"Local user: {local_user}")
     if username != local_user:
         print(f"Cluster user: {username}")
     else:
         print(f"Cluster user: {username} (same as local)")
+
+    # Show cluster
+    print(f"Cluster: {cluster}")
 
     # Show session type
     session_type = "Interactive" if interactive else "Allocation"
@@ -617,11 +627,11 @@ Requirements:
         sys.exit(1)
 
     # Test SSH connection
-    if not test_ssh_connection(username):
+    if not test_ssh_connection(username, cluster):
         sys.exit(1)
 
     # Allocate compute node and set up SSH config
-    success = getCode(username, partition, time_limit, gpu, cpus, memory, interactive=interactive)
+    success = getCode(username, partition, time_limit, gpu, cpus, memory, cluster, interactive)
 
     if not success:
         sys.exit(1)
